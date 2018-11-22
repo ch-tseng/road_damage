@@ -6,6 +6,7 @@ import time
 from io import BytesIO
 from time import sleep
 from picamera import PiCamera
+from picamera.array import PiRGBArray
 from PIL import Image
 import numpy as np
 
@@ -26,11 +27,14 @@ yolo = opencvYOLO(modeltype="yolov3-tiny", \
     cfg="yolov3-road-tiny.cfg")
 
 
-inputType = "webcam"  # webcam, image, video, picam
+inputType = "picam"  # webcam, image, video, picam
 media = ""
 #video_out = "/media/pi/SSD1T/recording/road.avi"
 video_out = "record/"
-video_length = 300
+video_length = 600
+framerate = 5.0
+picam_size = (640,480) #(1280,960)
+webcam_size = (960,640)
 #--------------------------------------------------
 
 # Raspberry Pi configuration.
@@ -50,16 +54,28 @@ if __name__ == "__main__":
 
     if(inputType == "webcam"):
         INPUT = cv2.VideoCapture(0)
-        INPUT.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
-        INPUT.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
+        INPUT.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_size[0])
+        INPUT.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_size[1])
+        width = webcam_size[0]
+        height = webcam_size[1]
+
     elif(inputType == "image"):
         INPUT = cv2.imread(media)
+
     elif(inputType == "video"):
         INPUT = cv2.VideoCapture(media)
+        width = cv2.CAP_PROP_FRAME_WIDTH
+        height = cv2.CAP_PROP_FRAME_HEIGHT
+
     elif(inputType == "picam"):
-        stream = BytesIO()
+        #stream = BytesIO()
         camera = PiCamera()
-        camera.resolution = (1024, 768)
+        camera.resolution = picam_size
+        camera.framerate = 32
+        rawCapture = PiRGBArray(camera, size=picam_size)
+        width = picam_size[0]
+        height = picam_size[1]
+        time.sleep(0.1)
 
     if(inputType == "image"):
         yolo.getObject(INPUT, labelWant="", drawBox=True, bold=1, textsize=0.6, bcolor=(0,0,255), tcolor=(255,255,255))
@@ -74,22 +90,19 @@ if __name__ == "__main__":
 
     else:
         if(video_out!=""):
-            width = int(INPUT.get(cv2.CAP_PROP_FRAME_WIDTH))   # float
-            height = int(INPUT.get(cv2.CAP_PROP_FRAME_HEIGHT)) # float
+            #width = int(INPUT.get(cv2.CAP_PROP_FRAME_WIDTH))   # float
+            #height = int(INPUT.get(cv2.CAP_PROP_FRAME_HEIGHT)) # float
 
             fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            out = cv2.VideoWriter(video_out + str(time.time()) + ".avi",fourcc, 30.0, (int(width),int(height)))
+            out = cv2.VideoWriter(video_out + str(time.time()) + ".avi",fourcc, framerate, (int(width),int(height)))
 
         frameID = 0
         record_time = time.time()
         while True:
             if(inputType == "picam"):
-                camera.capture(stream, format='jpeg', resize=(320, 240))
-                stream.seek(0)
-                frame = Image.open(stream)
-                frame = np.array(frame)
-                frame = frame[:, :, ::-1].copy()
-                cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                camera.capture(rawCapture, format='bgr')
+                frame = rawCapture.array
+                rawCapture.truncate(0)
                 hasFrame = True
             else:
                 #INPUT.release()
@@ -106,10 +119,10 @@ if __name__ == "__main__":
                 print("--- %s seconds ---" % (time.time() - start_time))
                 break
 
-            #yolo.getObject(frame, labelWant="", drawBox=True, bold=1, textsize=0.6, bcolor=(0,0,255), tcolor=(255,255,255))
-            #print ("Object counts:", yolo.objCounts)
-            #print("classIds:{}, confidences:{}, labelName:{}, bbox:{}".\
-            #    format(len(yolo.classIds), len(yolo.scores), len(yolo.labelNames), len(yolo.bbox)) )
+            yolo.getObject(frame, labelWant="", drawBox=True, bold=1, textsize=0.6, bcolor=(0,0,255), tcolor=(255,255,255))
+            print ("Object counts:", yolo.objCounts)
+            print("classIds:{}, confidences:{}, labelName:{}, bbox:{}".\
+                format(len(yolo.classIds), len(yolo.scores), len(yolo.labelNames), len(yolo.bbox)) )
 
 
             #to TFT
@@ -125,7 +138,7 @@ if __name__ == "__main__":
             if(video_out!=""):
                 if(time.time() - record_time > video_length):
                     out.release()
-                    out = cv2.VideoWriter(video_out + str(time.time()) + ".avi",fourcc, 30.0, (int(width),int(height)))
+                    out = cv2.VideoWriter(video_out + str(time.time()) + ".avi",fourcc, framerate, (int(width),int(height)))
                     record_time = time.time()
                 else:
                     out.write(frame)
